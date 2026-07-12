@@ -65,29 +65,65 @@ gano(partida2, rojo).
 jugador(Jugador):-
     composicion(_,Jugador,_,_).
 
+/*
+
+Si se puede resolver con forall o not, no usamos findall!!
 nuncaMurio(Jugador):-
     jugador(Jugador),
     findall(Death, kda(_, Jugador, _, Death, _), Deaths),
     sum_list(Deaths, 0).
 
+*/
+
+nuncaMurio(Jugador):-
+    jugador(Jugador),
+    not(murioAlgunaVez(Jugador)).
+
+murioAlgunaVez(Jugador):-
+    kda(_, Jugador, _, Deaths, _),
+    Deaths > 0.
+
+
+%Acá si es necesario usar findall, necesitamos acumular las kills para sumarlas
 killsTotales(Jugador, CantidadKills):-
     jugador(Jugador),
     findall(Kill, kda(_, Jugador, Kill, _, _), Kills),
     sum_list(Kills, CantidadKills).
+
+/*
+Esta versión es MENOS declarativa
 
 fueHardCarryAlgunaVez(Jugador):-
     jugador(Jugador),
     findall(Partida, composicion(Partida, Jugador, _, hardCarry), PartidasEnLaQueFueCarry),
     length(PartidasEnLaQueFueCarry, VecesQueFueCarry),
     VecesQueFueCarry >= 1.
+*/
 
+%Se puede resolver con la regla: fue hard carry alguna vez si existe una composición donde fue hard carry
+fueHardCarryAlgunaVez(Jugador):-
+    composicion(_, Jugador, _, hardCarry).
+
+/*Que siempre gano se puede decir como "para cada partida que jugó, la gano" -> se puede resolver con forall
 siempreGano(Equipo):-
     composicion(_, _, Equipo, _),
     findall(Partida, gano(Partida, _), PartidasTotales),
     findall(PartidaQueGano, gano(PartidaQueGano, Equipo), PartidasQueGanaron),
     length(PartidasTotales, CantidadPartidasTotales),
     length(PartidasQueGanaron, CantidadPartidasTotales).
+*/
 
+equipo(Equipo):-
+    composicion(_, _, Equipo, _).
+
+jugo(Equipo, Partida):-
+    composicion(Partida, _, Equipo, _).
+
+siempreGano(Equipo):-
+    equipo(Equipo),
+    forall(jugo(Equipo, Partida), gano(Partida, Equipo)).
+
+/* Esto se puede pensar como "para todo rol, el jugador jugo ese rol" -> se puede resolver con forall
 fueDeTodosLosRoles(Jugador):-
     jugador(Jugador),
     findall(Rol, composicion(_, Jugador, _, Rol), RolesQueUso),
@@ -96,20 +132,96 @@ fueDeTodosLosRoles(Jugador):-
     member(offlane, RolesQueUso),
     member(hardsupport, RolesQueUso),
     member(softSupport, RolesQueUso).
+*/
 
+rol(Rol):-
+    composicion(_, _, _, Rol).
+
+fueDeTodosLosRoles(Jugador):-
+    jugador(Jugador),
+    forall(rol(Rol), composicion(_, Jugador, _, Rol)).
+
+
+% Necesito el findall porque necesito acumular los roles en una cantidad
 cantidadDeRolesQueUso(Jugador, Cantidad):-
     jugador(Jugador),
     findall(Rol, composicion(_, Jugador, _ , Rol), RolesQueUso),
     list_to_set(RolesQueUso, RolesSinRepetidos),
     length(RolesSinRepetidos, Cantidad).
 
+/* Se puede pensar como "para toda partida que jugo, la gano" -> uso forall
 nuncaPerdio(Jugador):-
     jugador(Jugador),
     findall(Partida, (composicion(Partida, Jugador, Equipo , _ ), not(gano(Partida, Equipo))), PartidasPerdidas),
     length(PartidasPerdidas, 0).
+*/
 
+nuncaPerdio(Jugador):-
+    jugador(Jugador),
+    forall(composicion(Partida, Jugador, _, _), laGano(Jugador, Partida)).
+
+laGano(Jugador, Partida):-
+    composicion(Partida, Jugador, Equipo, _),
+    gano(Partida, Equipo).
+
+/* Se puede pensar como no existe una partida donde el rol haya sido diferente
 siempreUsoElMismoRol(Jugador):-
     jugador(Jugador),
     findall(Rol, composicion(_, Jugador, _, Rol), RolesQueUso),
     list_to_set(RolesQueUso, RolesSinRepetidos),
     length(RolesSinRepetidos, 1).
+*/
+
+siempreUsoElMismoRol(Jugador):-
+    composicion(_, Jugador, _, Rol),
+    not(usoRolDiferente(Jugador, Rol)).
+
+usoRolDiferente(Jugador, Rol):-
+    composicion(_, Jugador, _, OtroRol),
+    OtroRol \= Rol.
+
+%%%%%%%%%%% Nuevos requerimientos %%%%%%%%%%%%%
+
+%valor/3 -> Jugador, Partida, Valor
+valor(Jugador, Partida, Valor):-
+    kda(Partida, Jugador, Kills, Deaths, Assists),
+    Valor is Kills * 2 + Assists / 4 - Deaths * 3.
+
+%cumplioSuRolEn/2 -> Jugador, Partida
+cumplioSuRolEn(Jugador, Partida):-
+    composicion(Partida, Jugador, _, Rol),
+    valor(Jugador, Partida, Valor),
+    valorEsperadoPara(Rol, ValorEsperado),
+    Valor > ValorEsperado.
+
+% valorEsperadoPara/2 -> Rol, ValorEsperado
+valorEsperadoPara(Rol, Valor):-
+    categoriaDe(Rol, Categoria),
+    valorParaCategoria(Categoria, Valor).
+
+% valorParaCategoria/2 -> Categoria, Valor
+valorParaCategoria(offlane, 400).
+valorParaCategoria(support, 250).
+valorParaCategoria(danio, 500).
+
+%categoriaDe/2 -> Rol, Categoria
+categoriaDe(offlane, offlane).
+categoriaDe(hardsupport, support).
+categoriaDe(softSupport, support).
+categoriaDe(mid, danio).
+categoriaDe(hardCarry, danio).
+
+%leGustaSupportear/1 -> Jugador - Para cada rol que tuvo el jugador, el rol es support
+leGustaSupportear(Jugador):-
+    jugador(Jugador),
+    forall(composicion(_, Jugador, _, Rol), categoriaDe(Rol, support)).
+
+%fueMvp/2 -> Jugador, Partida - Para cada valor que hubo en esa partida, el valor del jugador es mayor o igual
+fueMvp(Jugador, Partida):-
+    valor(Jugador, Partida, Valor),
+    forall(valor(_, Partida, OtroValor), Valor >= OtroValor).
+
+%noTuvoSuMomento/1 -> Jugador - No existe una partida donde haya sido mvp
+noTuvoSuMomento(Jugador):-
+    jugador(Jugador),
+    not(fueMvp(Jugador, _)).
